@@ -111,6 +111,21 @@ public class HandleConstructor {
 		return fields;
 	}
 	
+	private static List<EclipseNode> findAllFields(EclipseNode typeNode) {
+		List<EclipseNode> fields = new ArrayList<EclipseNode>();
+		for (EclipseNode child : typeNode.down()) {
+			if (child.getKind() != Kind.FIELD) continue;
+			FieldDeclaration fieldDecl = (FieldDeclaration) child.get();
+			if (!filterField(fieldDecl)) continue;
+			
+			// Skip initialized final fields.
+			if (((fieldDecl.modifiers & ClassFileConstants.AccFinal) != 0) && fieldDecl.initialization != null) continue;
+			
+			fields.add(child);
+		}
+		return fields;
+	}
+	
 	@ProviderFor(EclipseAnnotationHandler.class)
 	public static class HandleAllArgsConstructor extends EclipseAnnotationHandler<AllArgsConstructor> {
 		@Override public void handle(AnnotationValues<AllArgsConstructor> annotation, Annotation ast, EclipseNode annotationNode) {
@@ -122,18 +137,7 @@ public class HandleConstructor {
 			@SuppressWarnings("deprecation")
 			boolean suppressConstructorProperties = ann.suppressConstructorProperties();
 			if (level == AccessLevel.NONE) return;
-			List<EclipseNode> fields = new ArrayList<EclipseNode>();
-			for (EclipseNode child : typeNode.down()) {
-				if (child.getKind() != Kind.FIELD) continue;
-				FieldDeclaration fieldDecl = (FieldDeclaration) child.get();
-				if (!filterField(fieldDecl)) continue;
-				
-				// Skip initialized final fields.
-				if (((fieldDecl.modifiers & ClassFileConstants.AccFinal) != 0) && fieldDecl.initialization != null) continue;
-				
-				fields.add(child);
-			}
-			new HandleConstructor().generateConstructor(typeNode, level, fields, staticName, false, suppressConstructorProperties, ast);
+			new HandleConstructor().generateConstructor(typeNode, level, findAllFields(typeNode), staticName, false, suppressConstructorProperties, ast);
 		}
 	}
 	
@@ -155,20 +159,33 @@ public class HandleConstructor {
 		generateConstructor(typeNode, level, findRequiredFields(typeNode), staticName, skipIfConstructorExists, false, source);
 	}
 	
+	public void generateAllArgsConstructor(EclipseNode typeNode, AccessLevel level, String staticName, boolean skipIfConstructorExists, ASTNode source) {
+		generateConstructor(typeNode, level, findAllFields(typeNode), staticName, skipIfConstructorExists, false, source);
+	}
+	
 	public void generateConstructor(EclipseNode typeNode, AccessLevel level, List<EclipseNode> fields, String staticName, boolean skipIfConstructorExists, boolean suppressConstructorProperties, ASTNode source) {
+		boolean staticConstrRequired = staticName != null && !staticName.equals("");
+		
 		if (skipIfConstructorExists && constructorExists(typeNode) != MemberExistsResult.NOT_EXISTS) return;
 		if (skipIfConstructorExists) {
 			for (EclipseNode child : typeNode.down()) {
 				if (child.getKind() == Kind.ANNOTATION) {
 					if (annotationTypeMatches(NoArgsConstructor.class, child) ||
 							annotationTypeMatches(AllArgsConstructor.class, child) ||
-							annotationTypeMatches(RequiredArgsConstructor.class, child))
+							annotationTypeMatches(RequiredArgsConstructor.class, child)) {
+						
+						if (staticConstrRequired) {
+							// @Data has asked us to generate a constructor, but we're going to skip this instruction, as an explicit 'make a constructor' annotation
+							// will take care of it. However, @Data also wants a specific static name; this will be ignored; the appropriate way to do this is to use
+							// the 'staticName' parameter of the @XArgsConstructor you've stuck on your type.
+							// We should warn that we're ignoring @Data's 'staticConstructor' param.
+							typeNode.addWarning("Ignoring static constructor name: explicit @XxxArgsConstructor annotation present; its `staticName` parameter will be used.", source.sourceStart, source.sourceEnd);
+						}
 						return;
+					}
 				}
 			}
 		}
-		
-		boolean staticConstrRequired = staticName != null && !staticName.equals("");
 		
 		ConstructorDeclaration constr = createConstructor(staticConstrRequired ? AccessLevel.PRIVATE : level, typeNode, fields, suppressConstructorProperties, source);
 		injectMethod(typeNode, constr);

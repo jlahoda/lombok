@@ -46,14 +46,11 @@ import org.eclipse.jdt.internal.compiler.ast.Expression;
 import org.eclipse.jdt.internal.compiler.ast.FieldDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.MethodDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.NameReference;
-import org.eclipse.jdt.internal.compiler.ast.ParameterizedSingleTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.ReturnStatement;
 import org.eclipse.jdt.internal.compiler.ast.SingleNameReference;
-import org.eclipse.jdt.internal.compiler.ast.SingleTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.Statement;
 import org.eclipse.jdt.internal.compiler.ast.ThisReference;
 import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
-import org.eclipse.jdt.internal.compiler.ast.TypeParameter;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.TypeIds;
@@ -66,13 +63,9 @@ import org.mangosdk.spi.ProviderFor;
 public class HandleSetter extends EclipseAnnotationHandler<Setter> {
 	public boolean generateSetterForType(EclipseNode typeNode, EclipseNode pos, AccessLevel level, boolean checkForTypeLevelSetter) {
 		if (checkForTypeLevelSetter) {
-			if (typeNode != null) for (EclipseNode child : typeNode.down()) {
-				if (child.getKind() == Kind.ANNOTATION) {
-					if (annotationTypeMatches(Setter.class, child)) {
-						//The annotation will make it happen, so we can skip it.
-						return true;
-					}
-				}
+			if (hasAnnotation(Setter.class, typeNode)) {
+				//The annotation will make it happen, so we can skip it.
+				return true;
 			}
 		}
 		
@@ -113,13 +106,9 @@ public class HandleSetter extends EclipseAnnotationHandler<Setter> {
 	 * be a warning if its already there. The default access level is used.
 	 */
 	public void generateSetterForField(EclipseNode fieldNode, ASTNode pos, AccessLevel level) {
-		for (EclipseNode child : fieldNode.down()) {
-			if (child.getKind() == Kind.ANNOTATION) {
-				if (annotationTypeMatches(Setter.class, child)) {
-					//The annotation will make it happen, so we can skip it.
-					return;
-				}
-			}
+		if (hasAnnotation(Setter.class, fieldNode)) {
+			//The annotation will make it happen, so we can skip it.
+			return;
 		}
 		
 		createSetterForField(level, fieldNode, fieldNode, pos, false);
@@ -183,11 +172,11 @@ public class HandleSetter extends EclipseAnnotationHandler<Setter> {
 			}
 		}
 		
-		MethodDeclaration method = generateSetter((TypeDeclaration) fieldNode.up().get(), fieldNode, setterName, shouldReturnThis, modifier, source);
+		MethodDeclaration method = createSetter((TypeDeclaration) fieldNode.up().get(), fieldNode, setterName, shouldReturnThis, modifier, source);
 		injectMethod(fieldNode.up(), method);
 	}
 	
-	private MethodDeclaration generateSetter(TypeDeclaration parent, EclipseNode fieldNode, String name, boolean shouldReturnThis, int modifier, ASTNode source) {
+	private MethodDeclaration createSetter(TypeDeclaration parent, EclipseNode fieldNode, String name, boolean shouldReturnThis, int modifier, ASTNode source) {
 		FieldDeclaration field = (FieldDeclaration) fieldNode.get();
 		int pS = source.sourceStart, pE = source.sourceEnd;
 		long p = (long)pS << 32 | pE;
@@ -195,29 +184,15 @@ public class HandleSetter extends EclipseAnnotationHandler<Setter> {
 		setGeneratedBy(method, source);
 		method.modifiers = modifier;
 		if (shouldReturnThis) {
-			EclipseNode type = fieldNode;
-			while (type != null && type.getKind() != Kind.TYPE) type = type.up();
-			if (type != null && type.get() instanceof TypeDeclaration) {
-				TypeDeclaration typeDecl = (TypeDeclaration) type.get();
-				if (typeDecl.typeParameters != null && typeDecl.typeParameters.length > 0) {
-					TypeReference[] refs = new TypeReference[typeDecl.typeParameters.length];
-					int idx = 0;
-					for (TypeParameter param : typeDecl.typeParameters) {
-						TypeReference typeRef = new SingleTypeReference(param.name, (long)param.sourceStart << 32 | param.sourceEnd);
-						setGeneratedBy(typeRef, source);
-						refs[idx++] = typeRef;
-					}
-					method.returnType = new ParameterizedSingleTypeReference(typeDecl.name, refs, 0, p);
-				} else method.returnType = new SingleTypeReference(((TypeDeclaration)type.get()).name, p);
-			}
+			method.returnType = cloneSelfType(fieldNode, source);
 		}
 		
 		if (method.returnType == null) {
 			method.returnType = TypeReference.baseTypeReference(TypeIds.T_void, 0);
 			method.returnType.sourceStart = pS; method.returnType.sourceEnd = pE;
+			setGeneratedBy(method.returnType, source);
 			shouldReturnThis = false;
 		}
-		setGeneratedBy(method.returnType, source);
 		if (isFieldDeprecated(fieldNode)) {
 			method.annotations = new Annotation[] { generateDeprecatedAnnotation(source) };
 		}

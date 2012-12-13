@@ -19,7 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package lombok.javac;
+package lombok.experimental;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -27,10 +27,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marker to indicate a handler is to be called after all the non-resolution based visitors.
- * NB: Temporary solution - will be rewritten to a different style altogether in a future release.
+ * Used to indicate the explicit intention for the annotated entity to <em>not</em> be {@code final}.
+ * Currently used by {@code FieldDefaults} to avoid having it make a field final.
  */
-@Target(ElementType.TYPE)
-@Retention(RetentionPolicy.RUNTIME)
-public @interface ResolutionBased {
-}
+@Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.LOCAL_VARIABLE, ElementType.ANNOTATION_TYPE, ElementType.TYPE, ElementType.METHOD})
+@Retention(RetentionPolicy.SOURCE)
+public @interface NonFinal {}

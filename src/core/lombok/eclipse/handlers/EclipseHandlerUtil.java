@@ -249,7 +249,17 @@ public class EclipseHandlerUtil {
 		QualifiedTypeReference qtr = new QualifiedTypeReference(new char[][] {
 				{'j', 'a', 'v', 'a'}, {'l', 'a', 'n', 'g'}, {'D', 'e', 'p', 'r', 'e', 'c', 'a', 't', 'e', 'd'}}, poss(source, 3));
 		setGeneratedBy(qtr, source);
-		return new MarkerAnnotation(qtr, source.sourceStart);
+		MarkerAnnotation ma = new MarkerAnnotation(qtr, source.sourceStart);
+		// No matter what value you input for sourceEnd, the AST->DOM converter of eclipse will reparse to find the end, and will fail as
+		// it can't find code that isn't really there. This results in the end position being set to 2 or 0 or some weird magic value, and thus,
+		// length, as calculated by end-start, is all screwed up, resulting in IllegalArgumentException during a setSourceRange call MUCH later in the process.
+		// We solve it by going with a voodoo magic source start value such that the calculated length so happens to exactly be 0. 0 lengths are accepted
+		// by eclipse. For some reason.
+		// TL;DR: Don't change 1. 1 is sacred. Trust the 1.
+		// issue: #408.
+		ma.sourceStart = 1;
+		setGeneratedBy(ma, source);
+		return ma;
 	}
 	
 	public static boolean isFieldDeprecated(EclipseNode fieldNode) {
@@ -466,6 +476,24 @@ public class EclipseHandlerUtil {
 		return result.toArray(EMPTY_ANNOTATION_ARRAY);
 	}
 	
+	public static boolean hasAnnotation(Class<? extends java.lang.annotation.Annotation> type, EclipseNode node) {
+		if (node == null) return false;
+		if (type == null) return false;
+		switch (node.getKind()) {
+		case ARGUMENT:
+		case FIELD:
+		case LOCAL:
+		case TYPE:
+		case METHOD:
+			for (EclipseNode child : node.down()) {
+				if (annotationTypeMatches(type, child)) return true;
+			}
+			// intentional fallthrough
+		default:
+			return false;
+		}
+	}
+	
 	/**
 	 * Checks if the provided annotation type is likely to be the intended type for the given annotation node.
 	 * 
@@ -474,6 +502,31 @@ public class EclipseHandlerUtil {
 	public static boolean annotationTypeMatches(Class<? extends java.lang.annotation.Annotation> type, EclipseNode node) {
 		if (node.getKind() != Kind.ANNOTATION) return false;
 		return typeMatches(type, node, ((Annotation)node.get()).type);
+	}
+	
+	public static TypeReference cloneSelfType(EclipseNode context, ASTNode source) {
+		int pS = source.sourceStart, pE = source.sourceEnd;
+		long p = (long)pS << 32 | pE;
+		EclipseNode type = context;
+		TypeReference result = null;
+		while (type != null && type.getKind() != Kind.TYPE) type = type.up();
+		if (type != null && type.get() instanceof TypeDeclaration) {
+			TypeDeclaration typeDecl = (TypeDeclaration) type.get();
+			if (typeDecl.typeParameters != null && typeDecl.typeParameters.length > 0) {
+				TypeReference[] refs = new TypeReference[typeDecl.typeParameters.length];
+				int idx = 0;
+				for (TypeParameter param : typeDecl.typeParameters) {
+					TypeReference typeRef = new SingleTypeReference(param.name, (long)param.sourceStart << 32 | param.sourceEnd);
+					setGeneratedBy(typeRef, source);
+					refs[idx++] = typeRef;
+				}
+				result = new ParameterizedSingleTypeReference(typeDecl.name, refs, 0, p);
+			} else {
+				result = new SingleTypeReference(((TypeDeclaration)type.get()).name, p);
+			}
+		}
+		if (result != null) setGeneratedBy(result, source);
+		return result;
 	}
 	
 	public static TypeReference makeType(TypeBinding binding, ASTNode pos, boolean allowCompound) {
@@ -773,18 +826,19 @@ public class EclipseHandlerUtil {
 		}
 	}
 	
-	private static final Map<FieldDeclaration, GetterMethod> generatedLazyGetters = new WeakHashMap<FieldDeclaration, GetterMethod>();
+	private static final Map<FieldDeclaration, Object> generatedLazyGettersWithPrimitiveBoolean = new WeakHashMap<FieldDeclaration, Object>();
+	private static final Object MARKER = new Object();
 	
 	static void registerCreatedLazyGetter(FieldDeclaration field, char[] methodName, TypeReference returnType) {
-		generatedLazyGetters.put(field, new GetterMethod(methodName, returnType));
+		if (!nameEquals(returnType.getTypeName(), "boolean") || returnType.dimensions() > 0) return;
+		generatedLazyGettersWithPrimitiveBoolean.put(field, MARKER);
 	}
 	
 	private static GetterMethod findGetter(EclipseNode field) {
 		FieldDeclaration fieldDeclaration = (FieldDeclaration) field.get();
-		GetterMethod gm = generatedLazyGetters.get(fieldDeclaration);
-		if (gm != null) return gm;
+		boolean forceBool = generatedLazyGettersWithPrimitiveBoolean.containsKey(fieldDeclaration);
 		TypeReference fieldType = fieldDeclaration.type;
-		boolean isBoolean = nameEquals(fieldType.getTypeName(), "boolean") && fieldType.dimensions() == 0;
+		boolean isBoolean = forceBool || (nameEquals(fieldType.getTypeName(), "boolean") && fieldType.dimensions() == 0);
 		
 		EclipseNode typeNode = field.up();
 		for (String potentialGetterName : toAllGetterNames(field, isBoolean)) {
@@ -838,7 +892,7 @@ public class EclipseHandlerUtil {
 		return null;
 	}
 	
-	enum FieldAccess {
+	public enum FieldAccess {
 		GETTER, PREFER_FIELD, ALWAYS_FIELD;
 	}
 	
@@ -945,10 +999,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllGetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static List<String> toAllGetterNames(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllGetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllGetterNames(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -957,10 +1008,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toGetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toGetterName(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toGetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toGetterName(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -968,10 +1016,7 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toAllSetterNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static java.util.List<String> toAllSetterNames(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toAllSetterNames(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toAllSetterNames(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -980,10 +1025,24 @@ public class EclipseHandlerUtil {
 	 * Convenient wrapper around {@link TransformationsUtil#toSetterName(lombok.core.AnnotationValues, CharSequence, boolean)}.
 	 */
 	public static String toSetterName(EclipseNode field, boolean isBoolean) {
-		String fieldName = field.getName();
-		AnnotationValues<Accessors> accessors = EclipseHandlerUtil.getAccessorsForField(field);
-		
-		return TransformationsUtil.toSetterName(accessors, fieldName, isBoolean);
+		return TransformationsUtil.toSetterName(getAccessorsForField(field), field.getName(), isBoolean);
+	}
+	
+	/**
+	 * Translates the given field into all possible wither names.
+	 * Convenient wrapper around {@link TransformationsUtil#toAllWitherNames(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static java.util.List<String> toAllWitherNames(EclipseNode field, boolean isBoolean) {
+		return TransformationsUtil.toAllWitherNames(getAccessorsForField(field), field.getName(), isBoolean);
+	}
+	
+	/**
+	 * @return the likely wither name for the stated field. (e.g. private boolean foo; to withFoo).
+	 * 
+	 * Convenient wrapper around {@link TransformationsUtil#toWitherName(lombok.core.AnnotationValues, CharSequence, boolean)}.
+	 */
+	public static String toWitherName(EclipseNode field, boolean isBoolean) {
+		return TransformationsUtil.toWitherName(getAccessorsForField(field), field.getName(), isBoolean);
 	}
 	
 	/**
@@ -1003,6 +1062,10 @@ public class EclipseHandlerUtil {
 	 *    If the field is static, or starts with a '$', or is actually an enum constant, 'false' is returned, indicating you should skip it.
 	 */
 	public static boolean filterField(FieldDeclaration declaration) {
+		return filterField(declaration, true);
+	}
+	
+	public static boolean filterField(FieldDeclaration declaration, boolean skipStatic) {
 		// Skip the fake fields that represent enum constants.
 		if (declaration.initialization instanceof AllocationExpression &&
 				((AllocationExpression)declaration.initialization).enumConstant != null) return false;
@@ -1013,7 +1076,7 @@ public class EclipseHandlerUtil {
 		if (declaration.name.length > 0 && declaration.name[0] == '$') return false;
 		
 		// Skip static fields.
-		if ((declaration.modifiers & ClassFileConstants.AccStatic) != 0) return false;
+		if (skipStatic && (declaration.modifiers & ClassFileConstants.AccStatic) != 0) return false;
 		
 		return true;
 	}

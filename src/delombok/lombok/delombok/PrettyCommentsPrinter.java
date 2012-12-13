@@ -428,7 +428,7 @@ public class PrettyCommentsPrinter extends JCTree.Visitor {
      */
     public void printStat(JCTree tree) throws IOException {
         if (isEmptyStat(tree)) {
-            printEmptyStat();
+            // printEmptyStat(); // -- starting in java 7, these get lost, so to be consistent, we never print them.
         } else {
             printExpr(tree, TreeInfo.notExpression);
         }
@@ -568,7 +568,9 @@ public class PrettyCommentsPrinter extends JCTree.Visitor {
         }
         print(";");
         println();
+        int x = 0;
         for (List<JCTree> l = stats; l.nonEmpty(); l = l.tail) {
+        	x++;
             if (!isEnumerator(l.head)) {
                 align();
                 printStat(l.head);
@@ -1037,8 +1039,17 @@ public class PrettyCommentsPrinter extends JCTree.Visitor {
             throw new UncheckedIOException(e);
         }
     }
-
+    
+    private boolean isNoArgsSuperCall(JCExpression expr) {
+        if (!(expr instanceof JCMethodInvocation)) return false;
+        JCMethodInvocation tree = (JCMethodInvocation) expr;
+        if (!tree.typeargs.isEmpty() || !tree.args.isEmpty()) return false;
+        if (!(tree.meth instanceof JCIdent)) return false;
+        return ((JCIdent) tree.meth).name.toString().equals("super");
+    }
+    
     public void visitExec(JCExpressionStatement tree) {
+        if (isNoArgsSuperCall(tree.expr)) return;
         try {
             printExpr(tree.expr);
             if (prec == TreeInfo.notExpression) print(";");

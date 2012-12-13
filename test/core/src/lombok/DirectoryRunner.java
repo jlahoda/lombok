@@ -103,8 +103,7 @@ public class DirectoryRunner extends Runner {
 				if (!runTest(entry.getKey())) {
 					notifier.fireTestIgnored(testDescription);
 				}
-			}
-			catch (Throwable t) {
+			} catch (Throwable t) {
 				notifier.fireTestFailure(new Failure(testDescription, t));
 			}
 			notifier.fireTestFinished(testDescription);
@@ -131,6 +130,6 @@ public class DirectoryRunner extends Runner {
 		BufferedReader reader = new BufferedReader(new FileReader(file));
 		String line = reader.readLine();
 		reader.close();
-		return "//ignore".equals(line);
+		return line != null && line.startsWith("//ignore");
 	}
 }

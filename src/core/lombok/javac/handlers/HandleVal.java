@@ -24,11 +24,12 @@ package lombok.javac.handlers;
 import static lombok.javac.handlers.JavacHandlerUtil.*;
 
 import lombok.val;
+import lombok.core.HandlerPriority;
 import lombok.javac.JavacASTAdapter;
 import lombok.javac.JavacASTVisitor;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacResolution;
-import lombok.javac.ResolutionBased;
+import lombok.javac.ResolutionResetNeeded;
 
 import org.mangosdk.spi.ProviderFor;
 
@@ -44,7 +45,8 @@ import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.util.List;
 
 @ProviderFor(JavacASTVisitor.class)
-@ResolutionBased
+@HandlerPriority(65536) // 2^16; resolution needs to work, so if the RHS expression is i.e. a call to a generated getter, we have to run after that getter has been generated.
+@ResolutionResetNeeded
 public class HandleVal extends JavacASTAdapter {
 	@Override public void visitLocal(JavacNode localNode, JCVariableDecl local) {
 		if (local.vartype == null || (!local.vartype.toString().equals("val") && !local.vartype.toString().equals("lombok.val"))) return;
@@ -93,7 +95,12 @@ public class HandleVal extends JavacASTAdapter {
 			if (rhsOfEnhancedForLoop == null) {
 				if (local.init.type == null) {
 					JavacResolution resolver = new JavacResolution(localNode.getContext());
-					type = ((JCExpression) resolver.resolveMethodMember(localNode).get(local.init)).type;
+					try {
+						type = ((JCExpression) resolver.resolveMethodMember(localNode).get(local.init)).type;
+					} catch (RuntimeException e) {
+						System.err.println("Exception while resolving: " + localNode);
+						throw e;
+					}
 				} else {
 					type = local.init.type;
 				}

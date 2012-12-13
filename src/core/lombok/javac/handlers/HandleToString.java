@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2011 The Project Lombok Authors.
+ * Copyright (C) 2009-2012 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 package lombok.javac.handlers;
 
 import static lombok.javac.handlers.JavacHandlerUtil.*;
-import static lombok.javac.Javac.getCtcInt;
+import static lombok.javac.Javac.*;
 
 import lombok.ToString;
 import lombok.core.AnnotationValues;
@@ -95,14 +95,11 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 	}
 	
 	public void generateToStringForType(JavacNode typeNode, JavacNode errorNode) {
-		for (JavacNode child : typeNode.down()) {
-			if (child.getKind() == Kind.ANNOTATION) {
-				if (annotationTypeMatches(ToString.class, child)) {
-					//The annotation will make it happen, so we can skip it.
-					return;
-				}
-			}
+		if (hasAnnotation(ToString.class, typeNode)) {
+			//The annotation will make it happen, so we can skip it.
+			return;
 		}
+		
 		
 		boolean includeFieldNames = true;
 		try {
@@ -111,7 +108,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 		generateToString(typeNode, errorNode, null, null, includeFieldNames, null, false, FieldAccess.GETTER);
 	}
 	
-	private void generateToString(JavacNode typeNode, JavacNode source, List<String> excludes, List<String> includes,
+	public void generateToString(JavacNode typeNode, JavacNode source, List<String> excludes, List<String> includes,
 			boolean includeFieldNames, Boolean callSuper, boolean whineIfExists, FieldAccess fieldAccess) {
 		boolean notAClass = true;
 		if (typeNode.get() instanceof JCClassDecl) {
@@ -196,7 +193,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 			JCMethodInvocation callToSuper = maker.Apply(List.<JCExpression>nil(),
 					maker.Select(maker.Ident(typeNode.toName("super")), typeNode.toName("toString")),
 					List.<JCExpression>nil());
-			current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, callToSuper);
+			current = maker.Binary(CTC_PLUS, current, callToSuper);
 			first = false;
 		}
 		
@@ -216,21 +213,21 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 			} else expr = fieldAccessor;
 			
 			if (first) {
-				current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, expr);
+				current = maker.Binary(CTC_PLUS, current, expr);
 				first = false;
 				continue;
 			}
 			
 			if (includeFieldNames) {
-				current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, maker.Literal(infix + fieldNode.getName() + "="));
+				current = maker.Binary(CTC_PLUS, current, maker.Literal(infix + fieldNode.getName() + "="));
 			} else {
-				current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, maker.Literal(infix));
+				current = maker.Binary(CTC_PLUS, current, maker.Literal(infix));
 			}
 			
-			current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, expr);
+			current = maker.Binary(CTC_PLUS, current, expr);
 		}
 		
-		if (!first) current = maker.Binary(getCtcInt(JCTree.class, "PLUS"), current, maker.Literal(suffix));
+		if (!first) current = maker.Binary(CTC_PLUS, current, maker.Literal(suffix));
 		
 		JCStatement returnStatement = maker.Return(current);
 		

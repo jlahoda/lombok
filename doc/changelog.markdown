@@ -1,9 +1,22 @@
 Lombok Changelog
 ----------------
 
-### v0.11.3 Edge
-* BUGFIX: Eclipse would throw an OOME. [Issue #390](http://code.google.com/p/projectlombok/issues/detail?id=390)
+### v0.11.6 (October 30th, 2012)
+* FEATURE: Lombok can be disabled entirely for any given compile run by using JVM switch `-Dlombok.disable`. This might be useful for code style checkers and such.
+* FEATURE: Added support for Slf4j extended logger [Issue #421](http://code.google.com/p/projectlombok/issues/detail?id=421)
+* BUGFIX: {Delombok} Running delombok has been causing VerifyError errors when used with javac 1.7 since 0.11.0. [Issue #422](http://code.google.com/p/projectlombok/issues/detail?id=422)
+* BUGFIX: A conflict between lombok and certain eclipse plugins would result in NullPointerExceptions in the log when using `@Delegate`.
+* BUGFIX: `NullPointerException in lombok.javac.handlers.JavacHandlerUtil.upToTypeNode(JavacHandlerUtil.java:978)` when compiling with `@ExtensionMethod` in javac and generated constructors are involved. [Issue #423](http://code.google.com/p/projectlombok/issues/detail?id=423)
+* BUGFIX: `@Deprecated` on a field that gets a generated setter in eclipse would result in `IllegalArgumentException`, which you wouldn't see unless you have the error log open. If you have save actions defined, you'd get a popup box with the exception. Now fixed. [Issue #408](http://code.google.com/p/projectlombok/issues/detail?id=408)
 
+### v0.11.4 (August 13th, 2012)
+* FEATURE: {Experimental} `@Value`, `@Wither` and `@FieldDefaults` are now available. These are a lot like `@Data` but geared towards immutable classes. [Documentation on @Value](http://projectlombok.org/features/experimental/Value.html), [Documentation on @Wither](http://projectlombok.org/features/experimental/Wither.html) and [Documentation on @FieldDefaults](http://projectlombok.org/features/experimental/FieldDefaults.html).
+* BUGFIX: Eclipse would throw an OOME if using `@ExtensionMethod`. [Issue #390](http://code.google.com/p/projectlombok/issues/detail?id=390)
+* BUGFIX: {Netbeans} `@Cleanup` and `@Synchronized` cause far fewer issues in the netbeans editor. [Issue #393](http://code.google.com/p/projectlombok/issues/detail?id=393)
+* BUGFIX: {Installer} Erroneous messages about the installer complaining about needing root access when installing or removing lombok from eclipse installs has been fixed. The installer edge of this problem was actually already fixed in v0.11.2. [Issue #363](http://code.google.com/p/projectlombok/issues/detail?id=363)
+* BUGFIX: `@ExtensionMethod` had all sorts of issues in javac. [Issue #399](http://code.google.com/p/projectlombok/issues/detail?id=399)
+* BUGFIX: Generating static constructors with javac when you have fields with generics, i.e. `Class<T>`, caused errors. [Issue #396](http://code.google.com/p/projectlombok/issues/detail?id=396)
+* BUGFIX: Minor `@ExtensionMethod` issues in eclipse, such as the ability to call extension methods on a `super` reference which is now no longer possible. [Issue #406](http://code.google.com/p/projectlombok/issues/detail?id=406)
 
 ### v0.11.2 "Dashing Kakapo" (July 3rd, 2012)
 * FEATURE: {Experimental} `@ExtensionMethod` is now available to add extensions to

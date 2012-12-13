@@ -43,12 +43,10 @@ import com.sun.tools.javac.tree.JCTree.JCBlock;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
-import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.tree.JCTree.JCMethodDecl;
 import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.tree.JCTree.JCReturn;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
-import com.sun.tools.javac.tree.JCTree.JCTypeApply;
 import com.sun.tools.javac.tree.JCTree.JCTypeParameter;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
 import com.sun.tools.javac.util.List;
@@ -118,21 +116,25 @@ public class HandleConstructor {
 			@SuppressWarnings("deprecation")
 			boolean suppressConstructorProperties = ann.suppressConstructorProperties();
 			if (level == AccessLevel.NONE) return;
-			ListBuffer<JavacNode> fields = ListBuffer.lb();
-			for (JavacNode child : typeNode.down()) {
-				if (child.getKind() != Kind.FIELD) continue;
-				JCVariableDecl fieldDecl = (JCVariableDecl) child.get();
-				// Skip fields that start with $
-				if (fieldDecl.name.toString().startsWith("$")) continue;
-				long fieldFlags = fieldDecl.mods.flags;
-				// Skip static fields.
-				if ((fieldFlags & Flags.STATIC) != 0) continue;
-				// Skip initialized final fields.
-				if (((fieldFlags & Flags.FINAL) != 0) && fieldDecl.init != null) continue;
-				fields.append(child);
-			}
-			new HandleConstructor().generateConstructor(typeNode, level, fields.toList(), staticName, false, suppressConstructorProperties, annotationNode);
+			new HandleConstructor().generateConstructor(typeNode, level, findAllFields(typeNode), staticName, false, suppressConstructorProperties, annotationNode);
 		}
+	}
+	
+	private static List<JavacNode> findAllFields(JavacNode typeNode) {
+		ListBuffer<JavacNode> fields = ListBuffer.lb();
+		for (JavacNode child : typeNode.down()) {
+			if (child.getKind() != Kind.FIELD) continue;
+			JCVariableDecl fieldDecl = (JCVariableDecl) child.get();
+			//Skip fields that start with $
+			if (fieldDecl.name.toString().startsWith("$")) continue;
+			long fieldFlags = fieldDecl.mods.flags;
+			//Skip static fields.
+			if ((fieldFlags & Flags.STATIC) != 0) continue;
+			//Skip initialized final fields
+			boolean isFinal = (fieldFlags & Flags.FINAL) != 0;
+			if (!isFinal || fieldDecl.init == null) fields.append(child);
+		}
+		return fields.toList();
 	}
 	
 	static boolean checkLegality(JavacNode typeNode, JavacNode errorNode, String name) {
@@ -153,20 +155,33 @@ public class HandleConstructor {
 		generateConstructor(typeNode, level, findRequiredFields(typeNode), staticName, skipIfConstructorExists, false, source);
 	}
 	
+	public void generateAllArgsConstructor(JavacNode typeNode, AccessLevel level, String staticName, boolean skipIfConstructorExists, JavacNode source) {
+		generateConstructor(typeNode, level, findAllFields(typeNode), staticName, skipIfConstructorExists, false, source);
+	}
+	
 	public void generateConstructor(JavacNode typeNode, AccessLevel level, List<JavacNode> fields, String staticName, boolean skipIfConstructorExists, boolean suppressConstructorProperties, JavacNode source) {
+		boolean staticConstrRequired = staticName != null && !staticName.equals("");
+		
 		if (skipIfConstructorExists && constructorExists(typeNode) != MemberExistsResult.NOT_EXISTS) return;
 		if (skipIfConstructorExists) {
 			for (JavacNode child : typeNode.down()) {
 				if (child.getKind() == Kind.ANNOTATION) {
 					if (annotationTypeMatches(NoArgsConstructor.class, child) ||
 							annotationTypeMatches(AllArgsConstructor.class, child) ||
-							annotationTypeMatches(RequiredArgsConstructor.class, child))
+							annotationTypeMatches(RequiredArgsConstructor.class, child)) {
+						
+						if (staticConstrRequired) {
+							// @Data has asked us to generate a constructor, but we're going to skip this instruction, as an explicit 'make a constructor' annotation
+							// will take care of it. However, @Data also wants a specific static name; this will be ignored; the appropriate way to do this is to use
+							// the 'staticName' parameter of the @XArgsConstructor you've stuck on your type.
+							// We should warn that we're ignoring @Data's 'staticConstructor' param.
+							source.addWarning("Ignoring static constructor name: explicit @XxxArgsConstructor annotation present; its `staticName` parameter will be used.");
+						}
 						return;
+					}
 				}
 			}
 		}
-		
-		boolean staticConstrRequired = staticName != null && !staticName.equals("");
 		
 		JCMethodDecl constr = createConstructor(staticConstrRequired ? AccessLevel.PRIVATE : level, typeNode, fields, suppressConstructorProperties, source.get());
 		injectMethod(typeNode, constr);
@@ -259,16 +274,7 @@ public class HandleConstructor {
 		
 		for (JavacNode fieldNode : fields) {
 			JCVariableDecl field = (JCVariableDecl) fieldNode.get();
-			JCExpression pType;
-			if (field.vartype instanceof JCIdent) pType = maker.Ident(((JCIdent)field.vartype).name);
-			else if (field.vartype instanceof JCTypeApply) {
-				JCTypeApply typeApply = (JCTypeApply) field.vartype;
-				ListBuffer<JCExpression> tArgs = ListBuffer.lb();
-				for (JCExpression arg : typeApply.arguments) tArgs.append(arg);
-				pType = maker.TypeApply(typeApply.clazz, tArgs.toList());
-			} else {
-				pType = field.vartype;
-			}
+			JCExpression pType = cloneType(maker, field.vartype, source);
 			List<JCAnnotation> nonNulls = findAnnotations(fieldNode, TransformationsUtil.NON_NULL_PATTERN);
 			List<JCAnnotation> nullables = findAnnotations(fieldNode, TransformationsUtil.NULLABLE_PATTERN);
 			JCVariableDecl param = maker.VarDef(maker.Modifiers(Flags.FINAL, nonNulls.appendList(nullables)), field.name, pType, null);

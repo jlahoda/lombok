@@ -31,10 +31,10 @@ import java.util.List;
 import javax.lang.model.element.ElementKind;
 
 import lombok.core.AnnotationValues;
+import lombok.core.HandlerPriority;
 import lombok.experimental.ExtensionMethod;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
-import lombok.javac.ResolutionBased;
 
 import org.mangosdk.spi.ProviderFor;
 
@@ -55,13 +55,12 @@ import com.sun.tools.javac.tree.JCTree.JCExpression;
 import com.sun.tools.javac.tree.JCTree.JCFieldAccess;
 import com.sun.tools.javac.tree.JCTree.JCIdent;
 import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
-import com.sun.tools.javac.tree.TreeMaker;
 
 /**
  * Handles the {@link ExtensionMethod} annotation for javac.
  */
 @ProviderFor(JavacAnnotationHandler.class)
-@ResolutionBased
+@HandlerPriority(66560) // 2^16 + 2^10; we must run AFTER HandleVal which is at 2^16
 public class HandleExtensionMethod extends JavacAnnotationHandler<ExtensionMethod> {
 	@Override
 	public void handle(final AnnotationValues<ExtensionMethod> annotation, final JCAnnotation source, final JavacNode annotationNode) {
@@ -84,9 +83,6 @@ public class HandleExtensionMethod extends JavacAnnotationHandler<ExtensionMetho
 		final List<Extension> extensions = getExtensions(annotationNode, extensionProviders);
 		if (extensions.isEmpty()) return;
 		
-		// call HandleVal explicitly to ensure val gets handled before @ExtensionMethdod gets handled.
-		// TODO maybe we should prioritize lombok handler
-		annotationNode.traverse(new HandleVal());
 		new ExtensionMethodReplaceVisitor(annotationNode, extensions, suppressBaseMethods).replace();
 		
 		annotationNode.rebuild();
@@ -103,7 +99,7 @@ public class HandleExtensionMethod extends JavacAnnotationHandler<ExtensionMetho
 			if (providerType == null) continue;
 			if ((providerType.tsym.flags() & (INTERFACE | ANNOTATION)) != 0) continue;
 			
-			extensions.add(getExtension(typeNode, (ClassType) providerType));	
+			extensions.add(getExtension(typeNode, (ClassType) providerType));
 		}
 		return extensions;
 	}
@@ -151,9 +147,14 @@ public class HandleExtensionMethod extends JavacAnnotationHandler<ExtensionMetho
 			handleMethodCall((JCMethodInvocation) tree);
 			return super.visitMethodInvocation(tree, p);
 		}
-
+		
 		private void handleMethodCall(final JCMethodInvocation methodCall) {
 			JavacNode methodCallNode = annotationNode.getAst().get(methodCall);
+			
+			if (methodCallNode == null) {
+				// This should mean the node does not exist in the source at all. This is the case for generated nodes, such as implicit super() calls.
+				return;
+			}
 			
 			JavacNode surroundingType = upToTypeNode(methodCallNode);
 			
@@ -180,10 +181,7 @@ public class HandleExtensionMethod extends JavacAnnotationHandler<ExtensionMetho
 					Type firstArgType = types.erasure(extensionMethodType.asMethodType().argtypes.get(0));
 					if (!types.isAssignable(receiverType, firstArgType)) continue;
 					methodCall.args = methodCall.args.prepend(receiver);
-					
-					TreeMaker maker = annotationNode.getTreeMaker();
-					JCIdent extensionClassIdent = maker.Ident(annotationNode.toName(extensionProvider.toString()));
-					methodCall.meth = maker.Select(extensionClassIdent, annotationNode.toName(methodName));
+					methodCall.meth = chainDotsString(annotationNode, extensionProvider.toString() + "." + methodName);
 					return;
 				}
 			}

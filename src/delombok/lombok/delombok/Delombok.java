@@ -30,6 +30,8 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.Writer;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.UnsupportedCharsetException;
@@ -44,9 +46,11 @@ import java.util.Map;
 import javax.tools.DiagnosticListener;
 import javax.tools.JavaFileObject;
 
+import lombok.Lombok;
 import lombok.javac.CommentCatcher;
 import lombok.javac.LombokOptions;
 
+import com.sun.tools.javac.comp.Todo;
 import com.sun.tools.javac.main.JavaCompiler;
 import com.sun.tools.javac.main.OptionName;
 import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
@@ -68,15 +72,11 @@ public class Delombok {
 		this.presetWriter = writer;
 	}
 	
-	public Delombok() {
-//		context.put(DeleteLombokAnnotations.class, new DeleteLombokAnnotations(true));
-	}
-	
 	private PrintStream feedback = System.err;
 	private boolean verbose;
 	private boolean noCopy;
 	private boolean force = false;
-	private String classpath, sourcepath;
+	private String classpath, sourcepath, bootclasspath;
 	private LinkedHashMap<File, File> fileToBase = new LinkedHashMap<File, File>();
 	private List<File> filesToParse = new ArrayList<File>();
 	
@@ -114,6 +114,9 @@ public class Delombok {
 		@Shorthand("s")
 		@Description("Sourcepath (analogous to javac -sourcepath option)")
 		private String sourcepath;
+		
+		@Description("override Bootclasspath (analogous to javac -bootclasspath option)")
+		private String bootclasspath;
 		
 		@Description("Files to delombok. Provide either a file, or a directory. If you use a directory, all files in it (recursive) are delombok-ed")
 		@Sequential
@@ -173,6 +176,7 @@ public class Delombok {
 		
 		if (args.classpath != null) delombok.setClasspath(args.classpath);
 		if (args.sourcepath != null) delombok.setSourcepath(args.sourcepath);
+		if (args.bootclasspath != null) delombok.setBootclasspath(args.bootclasspath);
 		
 		try {
 			for (String in : args.input) {
@@ -228,6 +232,10 @@ public class Delombok {
 	
 	public void setSourcepath(String sourcepath) {
 		this.sourcepath = sourcepath;
+	}
+	
+	public void setBootclasspath(String bootclasspath) {
+		this.bootclasspath = bootclasspath;
 	}
 	
 	public void setVerbose(boolean verbose) {
@@ -355,6 +363,7 @@ public class Delombok {
 		options.put(OptionName.ENCODING, charset.name());
 		if (classpath != null) options.put(OptionName.CLASSPATH, classpath);
 		if (sourcepath != null) options.put(OptionName.SOURCEPATH, sourcepath);
+		if (bootclasspath != null) options.put(OptionName.BOOTCLASSPATH, bootclasspath);
 		options.put("compilePolicy", "attr");
 		
 		CommentCatcher catcher = CommentCatcher.create(context);
@@ -362,7 +371,6 @@ public class Delombok {
 		
 		List<JCCompilationUnit> roots = new ArrayList<JCCompilationUnit>();
 		Map<JCCompilationUnit, File> baseMap = new IdentityHashMap<JCCompilationUnit, File>();
-		
 		
 		compiler.initProcessAnnotations(Collections.singleton(new lombok.javac.apt.Processor()));
 		
@@ -374,13 +382,13 @@ public class Delombok {
 			baseMap.put(unit, fileToBase.get(fileToParse));
 			roots.add(unit);
 		}
-		
 		if (compiler.errorCount() > 0) {
 			// At least one parse error. No point continuing (a real javac run doesn't either).
 			return false;
 		}
 		
 		JavaCompiler delegate = compiler.processAnnotations(compiler.enterTrees(toJavacList(roots)));
+		callFlowMethodOnJavaCompiler(delegate, callAttributeMethodOnJavaCompiler(delegate, delegate.todo));
 		for (JCCompilationUnit unit : roots) {
 			DelombokResult result = new DelombokResult(catcher.getComments(unit), unit, force || options.isChanged(unit));
 			if (verbose) feedback.printf("File: %s [%s]\n", unit.sourcefile.getName(), result.isChanged() ? "delomboked" : "unchanged");
@@ -402,6 +410,50 @@ public class Delombok {
 		delegate.close();
 		
 		return true;
+	}
+	
+	private static Method attributeMethod;
+	/** Method is needed because the call signature has changed between javac6 and javac7; no matter what we compile against, using delombok in the other means VerifyErrors. */
+	private static Object callAttributeMethodOnJavaCompiler(JavaCompiler compiler, Todo arg) {
+		if (attributeMethod == null) {
+			try {
+				attributeMethod = JavaCompiler.class.getDeclaredMethod("attribute", java.util.Queue.class);
+			} catch (NoSuchMethodException e) {
+				try {
+					attributeMethod = JavaCompiler.class.getDeclaredMethod("attribute", com.sun.tools.javac.util.ListBuffer.class);
+				} catch (NoSuchMethodException e2) {
+					throw Lombok.sneakyThrow(e2);
+				}
+			}
+		}
+		try {
+			return attributeMethod.invoke(compiler, arg);
+		} catch (Exception e) {
+			if (e instanceof InvocationTargetException) throw Lombok.sneakyThrow(e.getCause());
+			throw Lombok.sneakyThrow(e);
+		}
+	}
+	
+	private static Method flowMethod;
+	/** Method is needed because the call signature has changed between javac6 and javac7; no matter what we compile against, using delombok in the other means VerifyErrors. */
+	private static void callFlowMethodOnJavaCompiler(JavaCompiler compiler, Object arg) {
+		if (flowMethod == null) {
+			try {
+				flowMethod = JavaCompiler.class.getDeclaredMethod("flow", java.util.Queue.class);
+			} catch (NoSuchMethodException e) {
+				try {
+					flowMethod = JavaCompiler.class.getDeclaredMethod("flow", com.sun.tools.javac.util.List.class);
+				} catch (NoSuchMethodException e2) {
+					throw Lombok.sneakyThrow(e2);
+				}
+			}
+		}
+		try {
+			flowMethod.invoke(compiler, arg);
+		} catch (Exception e) {
+			if (e instanceof InvocationTargetException) throw Lombok.sneakyThrow(e.getCause());
+			throw Lombok.sneakyThrow(e);
+		}
 	}
 	
 	private static String canonical(File dir) {

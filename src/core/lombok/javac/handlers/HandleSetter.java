@@ -21,8 +21,8 @@
  */
 package lombok.javac.handlers;
 
-import static lombok.javac.handlers.JavacHandlerUtil.*;
 import static lombok.javac.Javac.*;
+import static lombok.javac.handlers.JavacHandlerUtil.*;
 
 import java.util.Collection;
 
@@ -37,12 +37,12 @@ import lombok.core.AnnotationValues;
 import lombok.core.TransformationsUtil;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
+import lombok.javac.handlers.JavacHandlerUtil.FieldAccess;
 
 import org.mangosdk.spi.ProviderFor;
 
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.TypeTags;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCAssign;
@@ -67,13 +67,9 @@ import com.sun.tools.javac.util.Name;
 public class HandleSetter extends JavacAnnotationHandler<Setter> {
 	public void generateSetterForType(JavacNode typeNode, JavacNode errorNode, AccessLevel level, boolean checkForTypeLevelSetter) {
 		if (checkForTypeLevelSetter) {
-			if (typeNode != null) for (JavacNode child : typeNode.down()) {
-				if (child.getKind() == Kind.ANNOTATION) {
-					if (annotationTypeMatches(Setter.class, child)) {
-						//The annotation will make it happen, so we can skip it.
-						return;
-					}
-				}
+			if (hasAnnotation(Setter.class, typeNode)) {
+				//The annotation will make it happen, so we can skip it.
+				return;
 			}
 		}
 		
@@ -117,13 +113,9 @@ public class HandleSetter extends JavacAnnotationHandler<Setter> {
 	 * @param pos The node responsible for generating the setter (the {@code @Data} or {@code @Setter} annotation).
 	 */
 	public void generateSetterForField(JavacNode fieldNode, DiagnosticPosition pos, AccessLevel level) {
-		for (JavacNode child : fieldNode.down()) {
-			if (child.getKind() == Kind.ANNOTATION) {
-				if (annotationTypeMatches(Setter.class, child)) {
-					//The annotation will make it happen, so we can skip it.
-					return;
-				}
-			}
+		if (hasAnnotation(Setter.class, fieldNode)) {
+			//The annotation will make it happen, so we can skip it.
+			return;
 		}
 		
 		createSetterForField(level, fieldNode, fieldNode, false);
@@ -168,6 +160,11 @@ public class HandleSetter extends JavacAnnotationHandler<Setter> {
 		
 		if (methodName == null) {
 			source.addWarning("Not generating setter for this field: It does not fit your @Accessors prefix list.");
+			return;
+		}
+		
+		if ((fieldDecl.mods.flags & Flags.FINAL) != 0) {
+			source.addWarning("Not generating setter for this field: Setters cannot be generated for final fields.");
 			return;
 		}
 		
@@ -224,25 +221,12 @@ public class HandleSetter extends JavacAnnotationHandler<Setter> {
 		
 		JCExpression methodType = null;
 		if (returnThis) {
-			JavacNode typeNode = field;
-			while (typeNode != null && typeNode.getKind() != Kind.TYPE) typeNode = typeNode.up();
-			if (typeNode != null && typeNode.get() instanceof JCClassDecl) {
-				JCClassDecl type = (JCClassDecl) typeNode.get();
-				ListBuffer<JCExpression> typeArgs = ListBuffer.lb();
-				if (!type.typarams.isEmpty()) {
-					for (JCTypeParameter tp : type.typarams) {
-						typeArgs.append(treeMaker.Ident(tp.name));
-					}
-					methodType = treeMaker.TypeApply(treeMaker.Ident(type.name), typeArgs.toList());
-				} else {
-					methodType = treeMaker.Ident(type.name);
-				}
-			}
+			methodType = cloneSelfType(field);
 		}
 		
 		if (methodType == null) {
 			//WARNING: Do not use field.getSymbolTable().voidType - that field has gone through non-backwards compatible API changes within javac1.6.
-			methodType = treeMaker.Type(new JCNoType(getCtcInt(TypeTags.class, "VOID")));
+			methodType = treeMaker.Type(new JCNoType(CTC_VOID));
 			returnThis = false;
 		}
 		
@@ -272,8 +256,8 @@ public class HandleSetter extends JavacAnnotationHandler<Setter> {
 		
 		@Override
 		public TypeKind getKind() {
-			if (tag == getCtcInt(TypeTags.class, "VOID")) return TypeKind.VOID;
-			if (tag == getCtcInt(TypeTags.class, "NONE")) return TypeKind.NONE;
+			if (tag == CTC_VOID) return TypeKind.VOID;
+			if (tag == CTC_NONE) return TypeKind.NONE;
 			throw new AssertionError("Unexpected tag: " + tag);
 		}
 		

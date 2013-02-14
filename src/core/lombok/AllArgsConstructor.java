@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2011 The Project Lombok Authors.
+ * Copyright (C) 2010-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,12 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Generates an all-args constructor. An all-args constructor requires one argument
- * for every field in the class.
+ * Generates an all-args constructor.
+ * An all-args constructor requires one argument for every field in the class.
+ * <p>
+ * Complete documentation is found at <a href="http://projectlombok.org/features/Constructor.html">the project lombok features page for &#64;Constructor</a>.
+ * <p>
+ * Even though it is not listed, this annotation also has the {@code onConstructor} parameter. See the full documentation for more details.
  * 
  * @see NoArgsConstructor
  * @see RequiredArgsConstructor
@@ -45,6 +49,11 @@ public @interface AllArgsConstructor {
 	String staticName() default "";
 	
 	/**
+	 * Any annotations listed here are put on the generated constructor. The syntax for this feature is: {@code @AllArgsConstructor(onConstructor=@_({@AnnotationsGoHere}))}
+	 */
+	AnyAnnotation[] onConstructor() default {};
+	
+	/**
 	 * Sets the access level of the constructor. By default, generated constructors are {@code public}.
 	 */
 	AccessLevel access() default lombok.AccessLevel.PUBLIC;
@@ -59,4 +68,13 @@ public @interface AllArgsConstructor {
 	 */
 	@Deprecated
 	boolean suppressConstructorProperties() default false;
+	
+	/**
+	  * Placeholder annotation to enable the placement of annotations on the generated code.
+	  * @deprecated Don't use this annotation, ever - Read the documentation.
+	  */
+	@Deprecated
+	@Retention(RetentionPolicy.SOURCE)
+	@Target({})
+	@interface AnyAnnotation {}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Project Lombok Authors.
+ * Copyright (C) 2012-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,10 @@ import lombok.AccessLevel;
 /**
  * Put on any field to make lombok build a 'wither' - a withX method which produces a clone of this object (except for 1 field which gets a new value).
  * <p>
+ * Complete documentation is found at <a href="http://projectlombok.org/features/experimental/Wither.html">the project lombok features page for &#64;Wither</a>.
+ * <p>
+ * Even though it is not listed, this annotation also has the {@code onParam} and {@code onMethod} parameter. See the full documentation for more details.
+ * <p>
  * Example:
  * <pre>
  *     private &#64;Wither final int foo;
@@ -43,9 +47,6 @@ import lombok.AccessLevel;
  *         return this.foo == foo ? this : new SELF_TYPE(otherField1, otherField2, foo);
  *     }
  * </pre>
- * 
- * If any method named {@code withFoo} (case insensitive) exists, regardless of return type or parameters,
- * no method is generated, and instead a compiler warning is emitted.
  * <p>
  * This annotation can also be applied to a class, in which case it'll be as if all non-static fields that don't already have
  * a {@code Wither} annotation have the annotation.
@@ -57,4 +58,23 @@ public @interface Wither {
 	 * If you want your wither to be non-public, you can specify an alternate access level here.
 	 */
 	AccessLevel value() default AccessLevel.PUBLIC;
+	
+	/**
+	 * Any annotations listed here are put on the generated method. The syntax for this feature is: {@code @Setter(onMethod=@_({@AnnotationsGoHere}))}
+	 */
+	AnyAnnotation[] onMethod() default {};
+	
+	/**
+	 * Any annotations listed here are put on the generated method's parameter. The syntax for this feature is: {@code @Setter(onParam=@_({@AnnotationsGoHere}))}
+	 */
+	AnyAnnotation[] onParam() default {};
+	
+	/**
+	  * Placeholder annotation to enable the placement of annotations on the generated code.
+	  * @deprecated Don't use this annotation, ever - Read the documentation.
+	  */
+	@Deprecated
+	@Retention(RetentionPolicy.SOURCE)
+	@Target({})
+	@interface AnyAnnotation {}
 }

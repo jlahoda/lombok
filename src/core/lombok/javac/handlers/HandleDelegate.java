@@ -48,6 +48,7 @@ import lombok.javac.FindTypeVarScanner;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
 import lombok.javac.JavacResolution;
+import lombok.javac.JavacTreeMaker;
 import lombok.javac.ResolutionResetNeeded;
 import lombok.javac.JavacResolution.TypeNotConvertibleException;
 
@@ -71,7 +72,6 @@ import com.sun.tools.javac.tree.JCTree.JCModifiers;
 import com.sun.tools.javac.tree.JCTree.JCStatement;
 import com.sun.tools.javac.tree.JCTree.JCTypeParameter;
 import com.sun.tools.javac.tree.JCTree.JCVariableDecl;
-import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Name;
 
@@ -266,12 +266,12 @@ public class HandleDelegate extends JavacAnnotationHandler<Delegate> {
 		
 		checkConflictOfTypeVarNames(sig, annotation);
 		
-		TreeMaker maker = annotation.getTreeMaker();
+		JavacTreeMaker maker = annotation.getTreeMaker();
 		
 		com.sun.tools.javac.util.List<JCAnnotation> annotations;
 		if (sig.isDeprecated) {
 			annotations = com.sun.tools.javac.util.List.of(maker.Annotation(
-					chainDots(annotation, "java", "lang", "Deprecated"),
+					genJavaLangTypeRef(annotation, "Deprecated"),
 					com.sun.tools.javac.util.List.<JCExpression>nil()));
 		} else {
 			annotations = com.sun.tools.javac.util.List.nil();
@@ -305,7 +305,8 @@ public class HandleDelegate extends JavacAnnotationHandler<Delegate> {
 		
 		int idx = 0;
 		for (TypeMirror param : sig.type.getParameterTypes()) {
-			JCModifiers paramMods = maker.Modifiers(Flags.FINAL);
+			long flags = JavacHandlerUtil.addFinalIfNeeded(Flags.PARAMETER, annotation.getContext());
+			JCModifiers paramMods = maker.Modifiers(flags);
 			String[] paramNames = sig.getParameterNames();
 			Name name = annotation.toName(paramNames[idx++]);
 			params.append(maker.VarDef(paramMods, name, JavacResolution.typeToJCTree((Type) param, annotation.getAst(), true), null));
@@ -316,7 +317,7 @@ public class HandleDelegate extends JavacAnnotationHandler<Delegate> {
 		JCStatement body = useReturn ? maker.Return(delegateCall) : maker.Exec(delegateCall);
 		JCBlock bodyBlock = maker.Block(0, com.sun.tools.javac.util.List.of(body));
 		
-		return recursiveSetGeneratedBy(maker.MethodDef(mods, sig.name, returnType, toList(typeParams), toList(params), toList(thrown), bodyBlock, null), annotation.get());
+		return recursiveSetGeneratedBy(maker.MethodDef(mods, sig.name, returnType, toList(typeParams), toList(params), toList(thrown), bodyBlock, null), annotation.get(), annotation.getContext());
 	}
 	
 	private static <T> com.sun.tools.javac.util.List<T> toList(ListBuffer<T> collection) {
@@ -394,13 +395,13 @@ public class HandleDelegate extends JavacAnnotationHandler<Delegate> {
 		METHOD {
 			public JCExpression get(final JavacNode node, final Name name) {
 				com.sun.tools.javac.util.List<JCExpression> nilExprs = com.sun.tools.javac.util.List.nil();
-				final TreeMaker maker = node.getTreeMaker();
+				final JavacTreeMaker maker = node.getTreeMaker();
 				return maker.Apply(nilExprs, maker.Select(maker.Ident(node.toName("this")), name), nilExprs);
 			}
 		},
 		FIELD {
 			public JCExpression get(final JavacNode node, final Name name) {
-				final TreeMaker maker = node.getTreeMaker();
+				final JavacTreeMaker maker = node.getTreeMaker();
 				return maker.Select(maker.Ident(node.toName("this")), name);
 			}
 		};

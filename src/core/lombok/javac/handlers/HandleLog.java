@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 The Project Lombok Authors.
+ * Copyright (C) 2010-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,12 +28,12 @@ import java.lang.annotation.Annotation;
 import lombok.core.AnnotationValues;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
+import lombok.javac.JavacTreeMaker;
 
 import org.mangosdk.spi.ProviderFor;
 
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCClassDecl;
 import com.sun.tools.javac.tree.JCTree.JCExpression;
@@ -74,15 +74,15 @@ public class HandleLog {
 	}
 	
 	private static JCFieldAccess selfType(JavacNode typeNode) {
-		TreeMaker maker = typeNode.getTreeMaker();
+		JavacTreeMaker maker = typeNode.getTreeMaker();
 		Name name = ((JCClassDecl) typeNode.get()).name;
 		return maker.Select(maker.Ident(name), typeNode.toName("class"));
 	}
 	
 	private static boolean createField(LoggingFramework framework, JavacNode typeNode, JCFieldAccess loggingType, JCTree source) {
-		TreeMaker maker = typeNode.getTreeMaker();
+		JavacTreeMaker maker = typeNode.getTreeMaker();
 		
-		// 	private static final <loggerType> log = <factoryMethod>(<parameter>);
+		// private static final <loggerType> log = <factoryMethod>(<parameter>);
 		JCExpression loggerType = chainDotsString(typeNode, framework.getLoggerTypeName());
 		JCExpression factoryMethod = chainDotsString(typeNode, framework.getLoggerFactoryMethodName());
 		
@@ -91,9 +91,9 @@ public class HandleLog {
 		
 		JCVariableDecl fieldDecl = recursiveSetGeneratedBy(maker.VarDef(
 				maker.Modifiers(Flags.PRIVATE | Flags.FINAL | Flags.STATIC),
-				typeNode.toName("log"), loggerType, factoryMethodCall), source);
+				typeNode.toName("log"), loggerType, factoryMethodCall), source, typeNode.getContext());
 		
-		injectField(typeNode, fieldDecl);
+		injectFieldSuppressWarnings(typeNode, fieldDecl);
 		return true;
 	}
 	
@@ -128,6 +128,16 @@ public class HandleLog {
 	}
 	
 	/**
+	 * Handles the {@link lombok.extern.log4j.Log4j2} annotation for javac.
+	 */
+	@ProviderFor(JavacAnnotationHandler.class)
+	public static class HandleLog4j2Log extends JavacAnnotationHandler<lombok.extern.log4j.Log4j2> {
+		@Override public void handle(AnnotationValues<lombok.extern.log4j.Log4j2> annotation, JCAnnotation ast, JavacNode annotationNode) {
+			processAnnotation(LoggingFramework.LOG4J2, annotation, annotationNode);
+		}
+	}
+	
+	/**
 	 * Handles the {@link lombok.extern.slf4j.Slf4j} annotation for javac.
 	 */
 	@ProviderFor(JavacAnnotationHandler.class)
@@ -154,7 +164,7 @@ public class HandleLog {
 		// private static final java.util.logging.Logger log = java.util.logging.Logger.getLogger(TargetType.class.getName());
 		JUL(lombok.extern.java.Log.class, "java.util.logging.Logger", "java.util.logging.Logger.getLogger") {
 			@Override public JCExpression createFactoryParameter(JavacNode typeNode, JCFieldAccess loggingType) {
-				TreeMaker maker = typeNode.getTreeMaker();
+				JavacTreeMaker maker = typeNode.getTreeMaker();
 				JCExpression method = maker.Select(loggingType, typeNode.toName("getName"));
 				return maker.Apply(List.<JCExpression>nil(), method, List.<JCExpression>nil());
 			}
@@ -162,6 +172,9 @@ public class HandleLog {
 		
 		// private static final org.apache.log4j.Logger log = org.apache.log4j.Logger.getLogger(TargetType.class);
 		LOG4J(lombok.extern.log4j.Log4j.class, "org.apache.log4j.Logger", "org.apache.log4j.Logger.getLogger"),
+		
+		// private static final org.apache.logging.log4j.Logger log = org.apache.logging.log4j.LogManager.getLogger(TargetType.class);
+		LOG4J2(lombok.extern.log4j.Log4j2.class, "org.apache.logging.log4j.Logger", "org.apache.logging.log4j.LogManager.getLogger"),
 		
 		// private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TargetType.class);
 		SLF4J(lombok.extern.slf4j.Slf4j.class, "org.slf4j.Logger", "org.slf4j.LoggerFactory.getLogger"),

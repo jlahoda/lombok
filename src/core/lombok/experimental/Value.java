@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Project Lombok Authors.
+ * Copyright (C) 2012-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@ import java.lang.annotation.Target;
 /**
  * Generates a lot of code which fits with a class that is a representation of an immutable entity.
  * <p>
- * Equivalent to {@code @Getter @Wither @FieldDefaults(makeFinal=true, level=AccessLevel.PRIVATE) @RequiredArgsConstructor @ToString @EqualsAndHashCode}.
+ * Equivalent to {@code @Getter @FieldDefaults(makeFinal=true, level=AccessLevel.PRIVATE) @RequiredArgsConstructor @ToString @EqualsAndHashCode}.
  * <p>
  * Complete documentation is found at <a href="http://projectlombok.org/features/experimental/Value.html">the project lombok features page for &#64;Value</a>.
  * 
@@ -39,9 +39,11 @@ import java.lang.annotation.Target;
  * @see lombok.ToString
  * @see lombok.EqualsAndHashCode
  * @see lombok.Data
+ * @deprecated {@link lombok.Value} has been promoted to the main package, so use that one instead.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.SOURCE)
+@Deprecated
 public @interface Value {
 	/**
 	 * If you specify a static constructor name, then the generated constructor will be private, and

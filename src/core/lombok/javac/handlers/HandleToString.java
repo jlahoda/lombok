@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2012 The Project Lombok Authors.
+ * Copyright (C) 2009-2013 The Project Lombok Authors.
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,19 @@ package lombok.javac.handlers;
 import static lombok.javac.handlers.JavacHandlerUtil.*;
 import static lombok.javac.Javac.*;
 
+import java.util.Collection;
+
 import lombok.ToString;
 import lombok.core.AnnotationValues;
 import lombok.core.AST.Kind;
 import lombok.javac.JavacAnnotationHandler;
 import lombok.javac.JavacNode;
+import lombok.javac.JavacTreeMaker;
 
 import org.mangosdk.spi.ProviderFor;
 
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.JCTree.JCAnnotation;
 import com.sun.tools.javac.tree.JCTree.JCArrayTypeTree;
 import com.sun.tools.javac.tree.JCTree.JCBlock;
@@ -127,7 +129,7 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 			return;
 		}
 		
-		ListBuffer<JavacNode> nodesForToString = ListBuffer.lb();
+		ListBuffer<JavacNode> nodesForToString = new ListBuffer<JavacNode>();
 		if (includes != null) {
 			for (JavacNode child : typeNode.down()) {
 				if (child.getKind() != Kind.FIELD) continue;
@@ -164,12 +166,12 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 		}
 	}
 	
-	private JCMethodDecl createToString(JavacNode typeNode, List<JavacNode> fields, boolean includeFieldNames, boolean callSuper, FieldAccess fieldAccess, JCTree source) {
-		TreeMaker maker = typeNode.getTreeMaker();
+	static JCMethodDecl createToString(JavacNode typeNode, Collection<JavacNode> fields, boolean includeFieldNames, boolean callSuper, FieldAccess fieldAccess, JCTree source) {
+		JavacTreeMaker maker = typeNode.getTreeMaker();
 		
-		JCAnnotation overrideAnnotation = maker.Annotation(chainDots(typeNode, "java", "lang", "Override"), List.<JCExpression>nil());
+		JCAnnotation overrideAnnotation = maker.Annotation(genJavaLangTypeRef(typeNode, "Override"), List.<JCExpression>nil());
 		JCModifiers mods = maker.Modifiers(Flags.PUBLIC, List.of(overrideAnnotation));
-		JCExpression returnType = chainDots(typeNode, "java", "lang", "String");
+		JCExpression returnType = genJavaLangTypeRef(typeNode, "String");
 		
 		boolean first = true;
 		
@@ -198,18 +200,22 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 		}
 		
 		for (JavacNode fieldNode : fields) {
-			JCVariableDecl field = (JCVariableDecl) fieldNode.get();
 			JCExpression expr;
 			
 			JCExpression fieldAccessor = createFieldAccessor(maker, fieldNode, fieldAccess);
 			
-			if (getFieldType(fieldNode, fieldAccess) instanceof JCArrayTypeTree) {
-				boolean multiDim = ((JCArrayTypeTree)field.vartype).elemtype instanceof JCArrayTypeTree;
-				boolean primitiveArray = ((JCArrayTypeTree)field.vartype).elemtype instanceof JCPrimitiveTypeTree;
-				boolean useDeepTS = multiDim || !primitiveArray;
-				
-				JCExpression hcMethod = chainDots(typeNode, "java", "util", "Arrays", useDeepTS ? "deepToString" : "toString");
-				expr = maker.Apply(List.<JCExpression>nil(), hcMethod, List.<JCExpression>of(fieldAccessor));
+			JCExpression fieldType = getFieldType(fieldNode, fieldAccess);
+			
+			// The distinction between primitive and object will be useful if we ever add a 'hideNulls' option.
+			boolean fieldIsPrimitive = fieldType instanceof JCPrimitiveTypeTree;
+			boolean fieldIsPrimitiveArray = fieldType instanceof JCArrayTypeTree && ((JCArrayTypeTree) fieldType).elemtype instanceof JCPrimitiveTypeTree;
+			boolean fieldIsObjectArray = !fieldIsPrimitiveArray && fieldType instanceof JCArrayTypeTree;
+			@SuppressWarnings("unused")
+			boolean fieldIsObject = !fieldIsPrimitive && !fieldIsPrimitiveArray && !fieldIsObjectArray;
+			
+			if (fieldIsPrimitiveArray || fieldIsObjectArray) {
+				JCExpression tsMethod = chainDots(typeNode, "java", "util", "Arrays", fieldIsObjectArray ? "deepToString" : "toString");
+				expr = maker.Apply(List.<JCExpression>nil(), tsMethod, List.<JCExpression>of(fieldAccessor));
 			} else expr = fieldAccessor;
 			
 			if (first) {
@@ -234,10 +240,10 @@ public class HandleToString extends JavacAnnotationHandler<ToString> {
 		JCBlock body = maker.Block(0, List.of(returnStatement));
 		
 		return recursiveSetGeneratedBy(maker.MethodDef(mods, typeNode.toName("toString"), returnType,
-				List.<JCTypeParameter>nil(), List.<JCVariableDecl>nil(), List.<JCExpression>nil(), body, null), source);
+				List.<JCTypeParameter>nil(), List.<JCVariableDecl>nil(), List.<JCExpression>nil(), body, null), source, typeNode.getContext());
 	}
 	
-	private String getTypeName(JavacNode typeNode) {
+	private static String getTypeName(JavacNode typeNode) {
 		String typeName = ((JCClassDecl) typeNode.get()).name.toString();
 		JavacNode upType = typeNode.up();
 		while (upType.getKind() == Kind.TYPE) {

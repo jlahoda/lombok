@@ -149,7 +149,7 @@ public class JavacHandlerUtil {
 			if (source == null) generatedNodes.remove(node);
 			else generatedNodes.put(node, new WeakReference<JCTree>(source));
 		}
-		if (source != null && !inNetbeansEditor(context)) node.pos = source.pos;
+		if (source != null && (!inNetbeansEditor(context) || (node instanceof JCVariableDecl && (((JCVariableDecl) node).mods.flags & Flags.PARAMETER) != 0))) node.pos = source.pos;
 		return node;
 	}
 	
@@ -918,6 +918,14 @@ public class JavacHandlerUtil {
 	
 	private static void addSuppressWarningsAll(JCModifiers mods, JavacNode node, int pos, JCTree source, Context context) {
 		if (!LombokOptionsFactory.getDelombokOptions(context).getFormatPreferences().generateSuppressWarnings()) return;
+		for (JCAnnotation ann : mods.annotations) {
+			JCTree annType = ann.getAnnotationType();
+			Name lastPart = null;
+			if (annType instanceof JCIdent) lastPart = ((JCIdent) annType).name;
+			else if (annType instanceof JCFieldAccess) lastPart = ((JCFieldAccess) annType).name;
+			
+			if (lastPart != null && lastPart.contentEquals("SuppressWarnings")) return;
+		}
 		JavacTreeMaker maker = node.getTreeMaker();
 		JCExpression suppressWarningsType = genJavaLangTypeRef(node, "SuppressWarnings");
 		JCLiteral allLiteral = maker.Literal("all");
